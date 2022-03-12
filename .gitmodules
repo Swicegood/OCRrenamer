@@ -1,0 +1,3 @@
+[submodule "pdf2pdfocr"]
+	path = pdf2pdfocr
+	url = https://github.com/LeoFCardoso/pdf2pdfocr.git
