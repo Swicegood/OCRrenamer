@@ -5,7 +5,7 @@ import glob
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QApplication, QDialog, QPushButton, QLabel, QLineEdit, 
         QGridLayout, QFileDialog, QListView, QTreeView, QFileSystemModel,
-        QAbstractItemView, QListWidget, QTextEdit)
+        QAbstractItemView, QListWidget, QTextEdit, QCheckBox)
 
 global selected_files
 global docindex
@@ -21,7 +21,8 @@ class MainWindow(QDialog):
         self.resize(640,800)
         self.v = qpageview.View()
         self.wordBox = QTextEdit()
-        self.makeButton = QPushButton('Make Searchable (destructive)')
+        self.makeButton = QPushButton('Make Searchable')
+        self.removeOrginalCheckBox = QCheckBox('Remove Original (destructive)')
         self.backButton = QPushButton('<Back')
         self.nextButton = QPushButton('Next>')
         self.goButton = QPushButton('Save (destructive)')
@@ -35,7 +36,8 @@ class MainWindow(QDialog):
         layout = QGridLayout()
         layout.addWidget(self.v, 0, 0, 8, 3)
         layout.addWidget(self.wordBox, 0, 3, 1, 4, Qt.AlignTop)
-        layout.addWidget(self.makeButton, 1, 3, 1, 4, Qt.AlignTop )
+        layout.addWidget(self.makeButton, 1, 3, 1, 3, Qt.AlignTop )
+        layout.addWidget(self.removeOrginalCheckBox, 1, 6)
         layout.addWidget(self.suggestedLabel, 2, 3, 1, 1, Qt.AlignBottom)
         layout.addWidget(self.suggested1, 3, 3, 1, 4)
         layout.addWidget(self.suggested2, 4, 3, 1, 4)
@@ -46,11 +48,31 @@ class MainWindow(QDialog):
         layout.addWidget(self.goButton, 8, 2)
         layout.addWidget(self.nextButton, 8, 3)
         layout.setColumnMinimumWidth(0,500)
-        self.setLayout(layout)
+        self.setLayout(layout)        
+        self.makeButton.clicked.connect(self.onMakeSearchableClicked)
         self.backButton.clicked.connect(self.onBackButton)
         self.nextButton.clicked.connect(self.onNextButton)   
 
-    def load_wordbox(self, viewable_file):
+    def onMakeSearchableClicked(self):
+        global selected_files
+        global docindex
+        viewable_file = selected_files[docindex]
+        if len(viewable_file):
+
+            ext = os.path.splitext(viewable_file)[1]
+
+            if ext == '.pdf' or ext == '.PDF':
+                success = os.system('pdf2pdfocr/pdf2pdfocr.py -t -i "'+viewable_file+'"')
+                filebase = viewable_file.split('.')[0]
+                if filebase.split('-')[-1] != 'OCR':
+                    selected_files[docindex] = filebase+'-OCR.pdf'
+                if self.removeOrginalCheckBox.isChecked() and success == 0:
+                    os.remove(viewable_file)
+                viewable_file = selected_files[docindex]
+                self.removeOrginalCheckBox.setChecked(False)
+            self.load_viewable_file(viewable_file)           
+            
+    def load_wordbox(self):
         page = self.v.currentPage()
         full_text = page.text(page.rect())
         self.wordBox.setPlainText(full_text)
@@ -73,7 +95,7 @@ class MainWindow(QDialog):
                 self.v.loadSvgs(glob.glob(viewable_file))
             self.setWindowTitle(viewable_file)
         self.v.setViewMode(qpageview.FitWidth)
-        self.load_wordbox(viewable_file) 
+        self.load_wordbox() 
         self.v.show()
 
     def onBackButton(self):
