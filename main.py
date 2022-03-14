@@ -5,7 +5,7 @@ import glob
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QApplication, QDialog, QPushButton, QLabel, QLineEdit, 
         QGridLayout, QFileDialog, QListView, QTreeView, QFileSystemModel,
-        QAbstractItemView, QListWidget, QTextEdit, QCheckBox)
+        QAbstractItemView, QListWidget, QTextEdit, QCheckBox, QFrame)
 
 global selected_files
 global docindex
@@ -23,6 +23,8 @@ class MainWindow(QDialog):
         self.wordBox = QTextEdit()
         self.makeButton = QPushButton('Make Searchable')
         self.removeOrginalCheckBox = QCheckBox('Remove Original (destructive)')
+        self.infoLabel = QLabel('File Information:\n\nNo information yet')
+        self.dateCheckBox = QCheckBox("Add date to filname")
         self.backButton = QPushButton('<Back')
         self.nextButton = QPushButton('Next>')
         self.goButton = QPushButton('Save (destructive)')
@@ -31,22 +33,25 @@ class MainWindow(QDialog):
         self.suggested3 = QLineEdit()
         self.saveas = QLineEdit()
         self.saveas.setMinimumWidth(500)
+        self.infoLabel.setFrameStyle(QFrame.Panel | QFrame.Raised)
         self.suggestedLabel = QLabel("Suggested Filenames:")
         self.saveasLabel = QLabel("Save As:")
         layout = QGridLayout()
-        layout.addWidget(self.v, 0, 0, 8, 3)
+        layout.addWidget(self.v, 0, 0, 9, 3)
         layout.addWidget(self.wordBox, 0, 3, 1, 4, Qt.AlignTop)
         layout.addWidget(self.makeButton, 1, 3, 1, 3, Qt.AlignTop )
         layout.addWidget(self.removeOrginalCheckBox, 1, 6)
-        layout.addWidget(self.suggestedLabel, 2, 3, 1, 1, Qt.AlignBottom)
-        layout.addWidget(self.suggested1, 3, 3, 1, 4)
-        layout.addWidget(self.suggested2, 4, 3, 1, 4)
-        layout.addWidget(self.suggested3, 5, 3, 1, 4)
-        layout.addWidget(self.saveasLabel, 6, 3, 1, 1, Qt.AlignBottom)
-        layout.addWidget(self.saveas, 7, 3, 1, 4)
-        layout.addWidget(self.backButton, 8, 1)
-        layout.addWidget(self.goButton, 8, 2)
-        layout.addWidget(self.nextButton, 8, 3)
+        layout.addWidget(self.infoLabel, 2, 3, 1, 4)
+        layout.addWidget(self.dateCheckBox, 2, 6, 1, 1)
+        layout.addWidget(self.suggestedLabel, 3, 3, 1, 1, Qt.AlignBottom)
+        layout.addWidget(self.suggested1, 4, 3, 1, 4)
+        layout.addWidget(self.suggested2, 5, 3, 1, 4)
+        layout.addWidget(self.suggested3, 6, 3, 1, 4)
+        layout.addWidget(self.saveasLabel, 7, 3, 1, 1, Qt.AlignBottom)
+        layout.addWidget(self.saveas, 8, 3, 1, 4)
+        layout.addWidget(self.backButton, 9, 1)
+        layout.addWidget(self.goButton, 9, 2)
+        layout.addWidget(self.nextButton, 9, 3)
         layout.setColumnMinimumWidth(0,500)
         self.setLayout(layout)        
         self.makeButton.clicked.connect(self.onMakeSearchableClicked)
@@ -94,7 +99,8 @@ class MainWindow(QDialog):
             elif ext == '.svg' or ext == '.SVG':
                 self.v.loadSvgs(glob.glob(viewable_file))
             self.setWindowTitle(viewable_file)
-        self.v.setViewMode(qpageview.FitWidth)
+        self.v.setViewMode(qpageview.FitBoth)        # shows the full page
+
         self.load_wordbox() 
         self.v.show()
 
@@ -125,9 +131,9 @@ class SelectFilesDialog(QDialog):
         self.listWidget = QListWidget()
         layout = QGridLayout()
         layout.addWidget(label, 0, 0, 1, 2)
-        layout.addWidget(button, 1, 1)
-        layout.addWidget(self.listWidget, 1, 0)
-        layout.addWidget(doneButton, 2, 0, 2, 1)
+        layout.addWidget(self.listWidget, 1, 0, 7, 1)        
+        layout.addWidget(button, 4, 1)
+        layout.addWidget(doneButton, 9, 0, 2, 1)
         layout.setColumnMinimumWidth(0, 500)
         layout.setRowMinimumHeight(0,200)
         self.setLayout(layout)
