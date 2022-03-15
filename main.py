@@ -2,10 +2,13 @@
 import qpageview
 import os
 import glob
+import platform
+import time
+from datetime import datetime
 from PyQt5.QtCore import Qt
 from PyQt5.QtWidgets import (QApplication, QDialog, QPushButton, QLabel, QLineEdit, 
         QGridLayout, QFileDialog, QListView, QTreeView, QFileSystemModel,
-        QAbstractItemView, QListWidget, QTextEdit, QCheckBox, QFrame)
+        QAbstractItemView, QListWidget, QTextEdit, QCheckBox, QFrame, QMessageBox)
 
 global selected_files
 global docindex
@@ -56,12 +59,23 @@ class MainWindow(QDialog):
         self.setLayout(layout)        
         self.makeButton.clicked.connect(self.onMakeSearchableClicked)
         self.backButton.clicked.connect(self.onBackButton)
-        self.nextButton.clicked.connect(self.onNextButton)   
+        self.nextButton.clicked.connect(self.onNextButton)       
 
+    def fillInfoBox(self):
+        path = selected_files[docindex]
+        mtime = os.path.getmtime(path)
+        ctime = creation_date(path)
+        mtime_pretty = datetime.utcfromtimestamp(mtime).strftime('%Y-%m-%d %H:%M:%S')
+        ctime_pretty = datetime.utcfromtimestamp(ctime).strftime('%Y-%m-%d %H:%M:%S')
+        infotxt = '\n\nFile Information:\n\n\nModified time: '+mtime_pretty+'\n\n\nCreation time: '+ctime_pretty+'\n\n'
+        self.infoLabel.setText(infotxt)
+        
     def onMakeSearchableClicked(self):
         global selected_files
         global docindex
-        viewable_file = selected_files[docindex]
+        viewable_file = selected_files[docindex]        
+        mtime_seconds = os.path.getmtime(viewable_file)
+        time_seconds = time.time()
         if len(viewable_file):
 
             ext = os.path.splitext(viewable_file)[1]
@@ -72,8 +86,9 @@ class MainWindow(QDialog):
                 if filebase.split('-')[-1] != 'OCR':
                     selected_files[docindex] = filebase+'-OCR.pdf'
                 if self.removeOrginalCheckBox.isChecked() and success == 0:
-                    os.remove(viewable_file)
+                    os.remove(viewable_file)                    
                 viewable_file = selected_files[docindex]
+                os.utime(viewable_file, (time_seconds, mtime_seconds))
                 self.removeOrginalCheckBox.setChecked(False)
             self.load_viewable_file(viewable_file)           
             
@@ -101,7 +116,8 @@ class MainWindow(QDialog):
             self.setWindowTitle(viewable_file)
         self.v.setViewMode(qpageview.FitBoth)        # shows the full page
 
-        self.load_wordbox() 
+        self.load_wordbox()
+        self.fillInfoBox() 
         self.v.show()
 
     def onBackButton(self):
@@ -136,16 +152,22 @@ class SelectFilesDialog(QDialog):
         layout.addWidget(doneButton, 9, 0, 2, 1)
         layout.setColumnMinimumWidth(0, 500)
         layout.setRowMinimumHeight(0,200)
-        self.setLayout(layout)
+        self.setLayout(layout)        
+        self.selected_folders = []
 
         button.clicked.connect(self.handleChooseDirectories)
         doneButton.clicked.connect(self.onDoneButtonClicked)
 
     def onDoneButtonClicked(self):  
         global selected_files
-        selected_files = create_file_list(self.selected_folders)
-        self.parent().load_viewable_file(selected_files[0])
-        self.close()
+        if not len(self.selected_folders):
+            msgBox = QMessageBox()
+            msgBox.setText('No Folders Selected!')
+            msgBox.exec()
+        else:
+            selected_files = create_file_list(self.selected_folders)
+            self.parent().load_viewable_file(selected_files[0])
+            self.close()
 
     def handleChooseDirectories(self):
         dialog = QFileDialog(self)
@@ -171,6 +193,23 @@ def create_file_list(selected_folders):
             for filename in files:
                 _selected_files.append(os.path.join(root, filename))
     return _selected_files
+
+def creation_date(path_to_file):
+        """
+        Try to get the date that a file was created, falling back to when it was
+        last modified if that isn't possible.
+        See http://stackoverflow.com/a/39501288/1709587 for explanation.
+        """
+        if platform.system() == 'Windows':
+            return os.path.getctime(path_to_file)
+        else:
+            stat = os.stat(path_to_file)
+            try:
+                return stat.st_birthtime
+            except AttributeError:
+                # We're probably on Linux. No easy way to get creation dates here,
+                # so we'll settle for when its content was last modified.
+                return stat.st_mtime
 
 if __name__ == '__main__':
 
