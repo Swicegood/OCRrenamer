@@ -1,11 +1,13 @@
 
+from http.client import OK
+from logging import warning
+from tkinter.messagebox import NO, YES
 import qpageview
 import os
 import glob
 import platform
 import time
-import io
-import subprocess
+from PIL import Image
 from datetime import datetime
 from PyQt5.QtCore import Qt, QProcess
 from PyQt5.QtWidgets import (QApplication, QDialog, QPushButton, QLabel, QLineEdit, 
@@ -114,6 +116,35 @@ class MainWindow(QDialog):
             if ext == '.pdf' or ext == '.PDF':
                 self.ocrproc.start('pdf2pdfocr/pdf2pdfocr.py', ['-t', '-i', viewable_file])
   
+            elif ext in ['.JPG','.JPEG','.PNG','.jpg','.jpeg','.png','.svg','.SVG']:
+                self.convert_to_pdf()
+                self.onMakeSearchableClicked()     
+           
+    def convert_to_pdf(self):
+        viewable_file = selected_files[docindex]        
+        mtime_seconds = os.path.getmtime(viewable_file)
+        time_seconds = time.time()
+        basename = os.path.basename(viewable_file)
+        dir = os.path.dirname(viewable_file)
+        filebase = basename.split('.')[0]
+        image_1 = Image.open(viewable_file)
+        im_1 = image_1.convert('RGB')
+        newpath = os.path.join(dir ,filebase) + '.pdf'
+        im_1.save(newpath)
+        msgBox = QMessageBox()
+        msgBox.setIcon(QMessageBox.Warning)
+        msgBox.setText('Do you want to DELETE the original?')
+        msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+  #      msgBox.buttonClicked.connect(self.msgbtn)
+        retval = msgBox.exec()
+        if retval == 0x00004000:
+            os.utime(newpath, (time_seconds, mtime_seconds))
+            os.remove(viewable_file)
+            selected_files[docindex] = newpath
+    
+    def msgbtn(self, button):
+        pass
+
     def onOcrFinished(self):
         self.makeButton.setEnabled(True)
         viewable_file = selected_files[docindex]        
