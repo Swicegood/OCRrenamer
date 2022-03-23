@@ -1,7 +1,4 @@
 
-from http.client import OK
-from logging import warning
-from tkinter.messagebox import NO, YES
 import qpageview
 import os
 import glob
@@ -10,6 +7,7 @@ import time
 from PIL import Image
 from datetime import datetime
 from PyQt5.QtCore import Qt, QProcess
+from PyQt5.QtGui import QTextCursor, QColor
 from PyQt5.QtWidgets import (QApplication, QDialog, QPushButton, QLabel, QLineEdit, 
         QGridLayout, QFileDialog, QListView, QTreeView, QFileSystemModel,
         QAbstractItemView, QListWidget, QTextEdit, QCheckBox, QFrame, QMessageBox,
@@ -23,14 +21,17 @@ class MainWindow(QDialog):
     def __init__(self, parent=None):
         super(MainWindow, self).__init__(parent)
 
+        self.namewords = []
         select_files = SelectFilesDialog(self)         
         select_files.show()   
 
         self.resize(640,800)
         self.v = qpageview.View()
         self.wordBox = QTextEdit()
+        self.mycursor = self.wordBox.textCursor()
         self.makeButton = QPushButton('Make Searchable')
-        self.removeOrginalCheckBox = QCheckBox('Remove Original (destructive)')
+        self.removeOrginalCheckBox = QCheckBox('Remove Original (destructive)')        
+        self.removeOrginalCheckBox.setChecked(True)
         self.infoLabel = QLabel('File Information:\n\nNo information yet')
         self.dateCheckBox = QCheckBox("Add date to filname")
         self.backButton = QPushButton('<Back')
@@ -76,19 +77,62 @@ class MainWindow(QDialog):
         self.backButton.clicked.connect(self.onBackButton)
         self.nextButton.clicked.connect(self.onNextButton)
         self.buttongroup.buttonClicked.connect(self.updatefromsuggested)
-        # self.sug1Check.stateChanged.connect(self.updatefromsuggested)
-        # self.sug2Check.stateChanged.connect(self.updatefromsuggested)
-        # self.sug3Check.stateChanged.connect(self.updatefromsuggested)
         self.dateCheckBox.stateChanged.connect(self.state_changed)
         self.buttongroup.setExclusive(True)
         # QProcess object for external app
         self.ocrproc = QProcess(self)
         # QProcess emits `readyRead` when there is data to be read
         self.ocrproc.readyRead.connect(self.dataReady)     
-    
+        self.wordBox.cursorPositionChanged.connect(self.onPosChange)
         self.ocrproc.started.connect(lambda: self.makeButton.setEnabled(False))
         self.ocrproc.finished.connect(self.onOcrFinished)
+        self.goButton.clicked.connect(self.save)
 
+
+    def onPosChange(self):      
+        if not self.newdoc:  
+            self.mycursor = self.wordBox.textCursor() 
+            self.charformat = self.mycursor.charFormat()
+            if self.mycursor.charFormat().background().color().rgb() == QColor("sandybrown").rgb():
+                self.mycursor.select(QTextCursor.SelectionType.WordUnderCursor)
+                self.charformat.setBackground(QColor("white"))
+                self.deleteFromFileName()
+            else:                
+                self.mycursor.select(QTextCursor.SelectionType.WordUnderCursor)
+                self.charformat.setBackground(QColor("sandybrown"))
+                self.appendToFileName()
+            self.mycursor.setCharFormat(self.charformat)
+
+    def appendToFileName(self):
+        word = self.mycursor.selection().toPlainText()
+        if len(word):
+            self.namewords.append(word)
+        self.constructFileName()
+
+    def deleteFromFileName(self):
+        word = self.mycursor.selection().toPlainText()
+        i = 0
+        for _word in self.namewords:
+            if _word == word:
+                self.namewords.pop(i)
+                break
+            i += 1        
+        self.constructFileName()
+
+    def constructFileName(self):
+        tail = '-OCR.pdf'
+        head = '_'.join(self.namewords)
+        self.suggested2.setText(head + tail)
+        self.saveas.setText(head + tail)
+ 
+    def save(self):
+        src = selected_files[docindex]
+        dir = os.path.dirname(src)
+        dst = self.saveas.text()
+        dst = os.path.join(dir,dst)
+        os.rename(src,dst)
+        selected_files[docindex] = dst
+        self.load_viewable_file(dst)
 
     def dataReady(self):
         cursor = self.wordBox.textCursor()
@@ -135,35 +179,43 @@ class MainWindow(QDialog):
         msgBox.setIcon(QMessageBox.Warning)
         msgBox.setText('Do you want to DELETE the original?')
         msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-  #      msgBox.buttonClicked.connect(self.msgbtn)
         retval = msgBox.exec()
         if retval == 0x00004000:
             os.utime(newpath, (time_seconds, mtime_seconds))
             os.remove(viewable_file)
             selected_files[docindex] = newpath
     
-    def msgbtn(self, button):
-        pass
 
     def onOcrFinished(self):
         self.makeButton.setEnabled(True)
         viewable_file = selected_files[docindex]        
         mtime_seconds = os.path.getmtime(viewable_file)
         time_seconds = time.time()
-        filebase = viewable_file.split('.')[0]
+        filebase = viewable_file.split('.')[0:-1]
+        filebase = '.'.join(filebase)
         if filebase.split('-')[-1] != 'OCR':
-            selected_files[docindex] = filebase+'-OCR.pdf'
-        if self.removeOrginalCheckBox.isChecked() and self.ocrproc.exitCode() == 0:
-            os.remove(viewable_file)                    
-        viewable_file = selected_files[docindex]
-        os.utime(viewable_file, (time_seconds, mtime_seconds))
-        self.removeOrginalCheckBox.setChecked(False)
+            if os.path.exists(filebase+'-OCR.pdf'):
+                selected_files[docindex] = filebase+'-OCR.pdf'
+                if self.removeOrginalCheckBox.isChecked() and self.ocrproc.exitCode() == 0:
+                    os.remove(viewable_file)  
+                viewable_file = selected_files[docindex]
+                os.utime(viewable_file, (time_seconds, mtime_seconds))
+            else:
+                if os.path.exists(viewable_file):
+                    os.rename(viewable_file, filebase+'-OCR.pdf')
+                    selected_files[docindex] = filebase+'-OCR.pdf'                    
+                    viewable_file = selected_files[docindex]
         self.load_viewable_file(viewable_file)           
             
-    def load_wordbox(self):
+    def load_wordbox(self):        
+        self.newdoc = True
+        self.charformat = self.mycursor.charFormat()
+        self.charformat.setBackground(QColor("white"))
+        self.mycursor.setCharFormat(self.charformat)
         page = self.v.currentPage()
         full_text = page.text(page.rect())
-        self.wordBox.setPlainText(full_text)
+        self.wordBox.setPlainText(full_text)   
+        self.newdoc = False     
         return full_text
 
     def load_viewable_file(self, viewable_file):
@@ -185,10 +237,12 @@ class MainWindow(QDialog):
             self.setWindowTitle(viewable_file)
         self.v.setViewMode(qpageview.FitBoth)        # shows the full page
 
+        self.namewords = []
         full_text = self.load_wordbox()
         self.fillInfoBox()
         self.saveas.setText(os.path.basename(viewable_file)) 
         self.suggested1.setText(head_in_snake_case(full_text, 14))
+        self.suggested2.setText('')
         base = os.path.basename(viewable_file).split('.')[0:-1]
         base = '.'.join(base)
         self.suggested3.setText(base)
@@ -258,18 +312,18 @@ class SelectFilesDialog(QDialog):
         super(SelectFilesDialog, self).__init__(parent)
         self.setModal(Qt.ApplicationModal)
         self.setWindowTitle('Select Folders')
+        self.setFocus()
         label = QLabel('Please Select all Folders you Wish to Scan for Scanned Documents.')
-        label.setMargin(50)
+        label.setMargin(5)
         button = QPushButton('. . .')
         doneButton = QPushButton('Done')
         self.listWidget = QListWidget()
         layout = QGridLayout()
         layout.addWidget(label, 0, 0, 1, 2)
-        layout.addWidget(self.listWidget, 1, 0, 7, 1)        
-        layout.addWidget(button, 4, 1)
-        layout.addWidget(doneButton, 9, 0, 2, 1)
+        layout.addWidget(self.listWidget, 1, 0, 1, 1)        
+        layout.addWidget(button, 1, 1)
+        layout.addWidget(doneButton, 3, 0, 2, 1)
         layout.setColumnMinimumWidth(0, 500)
-        layout.setRowMinimumHeight(0,200)
         self.setLayout(layout)        
         self.selected_folders = []
 
