@@ -1,3 +1,4 @@
+#!/home/jaga/.ocrvenv/bin/python
 
 import qpageview
 import os
@@ -6,7 +7,8 @@ import platform
 import time
 from PIL import Image
 from datetime import datetime
-from PyQt5.QtCore import Qt, QProcess
+from PyQt5.QtWebEngineWidgets import QWebEngineSettings, QWebEngineView
+from PyQt5.QtCore import Qt, QProcess, QUrl
 from PyQt5.QtGui import QTextCursor, QColor
 from PyQt5.QtWidgets import (QApplication, QDialog, QPushButton, QLabel, QLineEdit, 
         QGridLayout, QFileDialog, QListView, QTreeView, QFileSystemModel,
@@ -27,6 +29,9 @@ class MainWindow(QDialog):
 
         self.resize(640,800)
         self.v = qpageview.View()
+        self.webView = QWebEngineView()
+        self.webView.settings().setAttribute(QWebEngineSettings.PluginsEnabled, True)
+        self.webView.settings().setAttribute(QWebEngineSettings.PdfViewerEnabled, True)
         self.wordBox = QTextEdit()
         self.mycursor = self.wordBox.textCursor()
         self.makeButton = QPushButton('Make Searchable')
@@ -53,7 +58,7 @@ class MainWindow(QDialog):
         self.suggestedLabel = QLabel("Suggested Filenames:")
         self.saveasLabel = QLabel("Save As:")
         layout = QGridLayout()
-        layout.addWidget(self.v, 0, 0, 9, 3)
+        layout.addWidget(self.webView, 0, 0, 9, 3)
         layout.addWidget(self.wordBox, 0, 3, 1, 4, Qt.AlignTop)
         layout.addWidget(self.makeButton, 1, 3, 1, 3, Qt.AlignTop )
         layout.addWidget(self.removeOrginalCheckBox, 1, 6)
@@ -119,8 +124,12 @@ class MainWindow(QDialog):
             i += 1        
         self.constructFileName()
 
-    def constructFileName(self):
-        tail = '-OCR.pdf'
+    def constructFileName(self):        
+        suffix = ''
+        if self.dateCheckBox.isChecked():
+            suffix = self.saveas.text().split('_')[-1]
+            suffix = '_'+suffix.split('.')[0]
+        tail = '-OCR'+suffix+'.pdf'        
         head = '_'.join(self.namewords)
         self.suggested2.setText(head + tail)
         self.saveas.setText(head + tail)
@@ -130,7 +139,19 @@ class MainWindow(QDialog):
         dir = os.path.dirname(src)
         dst = self.saveas.text()
         dst = os.path.join(dir,dst)
-        os.rename(src,dst)
+        if os.path.exists(dst):
+            msgBox = QMessageBox()
+            msgBox.setIcon(QMessageBox.Warning)
+            msgBox.setText('File already exists. OVERWRITE it? CANNOT be undone!')
+            msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            retval = msgBox.exec()
+            if retval == 0x00004000:
+                os.rename(src,dst)
+            else:
+                self.load_viewable_file(src)
+                return
+        else:
+            os.rename(src,dst)
         selected_files[docindex] = dst
         self.load_viewable_file(dst)
 
@@ -213,7 +234,10 @@ class MainWindow(QDialog):
         self.charformat.setBackground(QColor("white"))
         self.mycursor.setCharFormat(self.charformat)
         page = self.v.currentPage()
-        full_text = page.text(page.rect())
+        if page is not None:
+            full_text = page.text(page.rect())
+        else:
+            full_text = ''
         self.wordBox.setPlainText(full_text)   
         self.newdoc = False     
         return full_text
@@ -225,17 +249,28 @@ class MainWindow(QDialog):
 
             if ext == '.pdf' or ext == '.PDF':
                 self.v.loadPdf(viewable_file)
+                file = 'file://'+viewable_file
+                self.webView.setUrl(QUrl(f"{file}"))
 
             elif ext == '.JPG' or ext == '.JPEG' or ext == '.PNG':
-                self.v.loadImages(glob.glob(viewable_file))
+                self.v.loadImages(glob.glob(viewable_file))                
+                file = 'file://'+viewable_file
+                self.webView.setUrl(QUrl(f"{file}"))
             
             elif ext == '.jpg' or ext == '.jpeg' or ext == '.png':
                 self.v.loadImages(glob.glob(viewable_file))
+                file = 'file://'+viewable_file
+                self.webView.setUrl(QUrl(f"{file}"))
                 
             elif ext == '.svg' or ext == '.SVG':
                 self.v.loadSvgs(glob.glob(viewable_file))
-            self.setWindowTitle(viewable_file)
-        self.v.setViewMode(qpageview.FitBoth)        # shows the full page
+                file = 'file://'+viewable_file
+                self.webView.setUrl(QUrl(f"{file}"))
+            else:
+                file = 'file://'+viewable_file
+                self.webView.setUrl(QUrl(f"{file}"))
+            title = viewable_file+',   '+str(docindex+1)+' of '+str(len(selected_files))    
+            self.setWindowTitle(title)
 
         self.namewords = []
         full_text = self.load_wordbox()
@@ -245,8 +280,7 @@ class MainWindow(QDialog):
         self.suggested2.setText('')
         base = os.path.basename(viewable_file).split('.')[0:-1]
         base = '.'.join(base)
-        self.suggested3.setText(base)
-        self.v.show()
+        self.suggested3.setText(base)       
 
     def state_changed(self, int):
         if self.dateCheckBox.isChecked():
@@ -304,7 +338,9 @@ class MainWindow(QDialog):
         global selected_files
         if docindex < len(selected_files) - 1:
             docindex += 1
-        self.load_viewable_file(selected_files[docindex])
+        self.load_viewable_file(selected_files[docindex])         
+        if self.dateCheckBox.isChecked():
+            self.onAddDateToFnameChecked()
 
 
 class SelectFilesDialog(QDialog):
