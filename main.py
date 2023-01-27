@@ -35,6 +35,7 @@ class MainWindow(QDialog):
         self.wordBox = QTextEdit()
         self.mycursor = self.wordBox.textCursor()
         self.makeButton = QPushButton('Make Searchable')
+        self.autoButton = QPushButton('Auto Convert All the Rest')
         self.removeOrginalCheckBox = QCheckBox('Remove Original (destructive)')        
         self.removeOrginalCheckBox.setChecked(True)
         self.infoLabel = QLabel('File Information:\n\nNo information yet')
@@ -60,10 +61,11 @@ class MainWindow(QDialog):
         layout = QGridLayout()
         layout.addWidget(self.webView, 0, 0, 9, 3)
         layout.addWidget(self.wordBox, 0, 3, 1, 4, Qt.AlignTop)
-        layout.addWidget(self.makeButton, 1, 3, 1, 3, Qt.AlignTop )
+        layout.addWidget(self.makeButton, 1, 3, 1, 3, Qt.AlignTop)
+        layout.addWidget(self.autoButton, 3, 4, 1, 1, Qt.AlignTop)
         layout.addWidget(self.removeOrginalCheckBox, 1, 6)
-        layout.addWidget(self.infoLabel, 2, 3, 1, 4)
-        layout.addWidget(self.dateCheckBox, 2, 6, 1, 1)
+        layout.addWidget(self.infoLabel, 2, 3, 1, 4, Qt.AlignBottom)
+        layout.addWidget(self.dateCheckBox, 2, 6, 1, 1, Qt.AlignBottom)
         layout.addWidget(self.suggestedLabel, 3, 3, 1, 1, Qt.AlignBottom)
         layout.addWidget(self.suggested1, 4, 3, 1, 4)
         layout.addWidget(self.sug1Check, 4, 7, 1, 1)
@@ -79,6 +81,7 @@ class MainWindow(QDialog):
         layout.setColumnMinimumWidth(0,500)
         self.setLayout(layout)        
         self.makeButton.clicked.connect(self.onMakeSearchableClicked)
+        self.autoButton.clicked.connect(self.onAutoClicked)
         self.backButton.clicked.connect(self.onBackButton)
         self.nextButton.clicked.connect(self.onNextButton)
         self.buttongroup.buttonClicked.connect(self.updatefromsuggested)
@@ -92,7 +95,11 @@ class MainWindow(QDialog):
         self.ocrproc.started.connect(lambda: self.makeButton.setEnabled(False))
         self.ocrproc.finished.connect(self.onOcrFinished)
         self.goButton.clicked.connect(self.save)
+        self.auto = False
 
+    def onAutoClicked(self):
+        self.auto = True
+        self.onMakeSearchableClicked()
 
     def onPosChange(self):      
         if not self.newdoc:  
@@ -195,13 +202,9 @@ class MainWindow(QDialog):
         image_1 = Image.open(viewable_file)
         im_1 = image_1.convert('RGB')
         newpath = os.path.join(dir ,filebase) + '.pdf'
-        im_1.save(newpath)
-        msgBox = QMessageBox()
-        msgBox.setIcon(QMessageBox.Warning)
-        msgBox.setText('Do you want to DELETE the original?')
-        msgBox.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        retval = msgBox.exec()
-        if retval == 0x00004000:
+        im_1.save(newpath)       
+        if self.removeOrginalCheckBox.isChecked():
+            print("Removing "+viewable_file)
             os.utime(newpath, (time_seconds, mtime_seconds))
             os.remove(viewable_file)
             selected_files[docindex] = newpath
@@ -226,7 +229,13 @@ class MainWindow(QDialog):
                     os.rename(viewable_file, filebase+'-OCR.pdf')
                     selected_files[docindex] = filebase+'-OCR.pdf'                    
                     viewable_file = selected_files[docindex]
-        self.load_viewable_file(viewable_file)           
+        self.load_viewable_file(viewable_file)
+        if self.auto:
+            if os.path.exists(selected_files[docindex]):            
+                self.onAddDateToFnameChecked()
+                self.save()
+            self.onNextButton()
+            self.onMakeSearchableClicked()
             
     def load_wordbox(self):        
         self.newdoc = True
@@ -244,9 +253,9 @@ class MainWindow(QDialog):
 
     def load_viewable_file(self, viewable_file):
         if viewable_file:
-
+            print('Loading: '+viewable_file)
             ext = os.path.splitext(viewable_file)[1]
-
+ 
             if ext == '.pdf' or ext == '.PDF':
                 self.v.loadPdf(viewable_file)
                 file = 'file://'+viewable_file
@@ -338,6 +347,10 @@ class MainWindow(QDialog):
         global selected_files
         if docindex < len(selected_files) - 1:
             docindex += 1
+        else:
+            msgBox = QMessageBox()
+            msgBox.setText('You have reached the END.')
+            msgBox.exec()
         self.load_viewable_file(selected_files[docindex])         
         if self.dateCheckBox.isChecked():
             self.onAddDateToFnameChecked()
