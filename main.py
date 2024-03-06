@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import (QApplication, QDialog, QPushButton, QLabel, QLineEd
         QGridLayout, QFileDialog, QListView, QTreeView, QFileSystemModel,
         QAbstractItemView, QListWidget, QTextEdit, QCheckBox, QFrame, QMessageBox,
         QButtonGroup)
+from openai_api import getAiGeneratedName as getAiGeneratedName
 
 global selected_files
 global docindex
@@ -286,7 +287,7 @@ class MainWindow(QDialog):
         self.fillInfoBox()
         self.saveas.setText(os.path.basename(viewable_file)) 
         self.suggested1.setText(head_in_snake_case(full_text, 14))
-        self.suggested2.setText('')
+        self.suggested2.setText(getAiGeneratedName(viewable_file))
         base = os.path.basename(viewable_file).split('.')[0:-1]
         base = '.'.join(base)
         self.suggested3.setText(base)       
