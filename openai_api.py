@@ -8,7 +8,7 @@ assistant_id = "asst_x12T5oG4veSRKIhgeJkw7303"
 def create_assistant(file_id):
     assistant = client.beta.assistants.create(
         name="PDF File Namer",
-        instructions="You are a personal assistant. Look at PDF files and name them accordingly. You only communicate by filenames. You do not output any other text",
+        instructions="You are a personal assistant. Look at PDF files and name them accordingly. Do not output any backslashes, forwardslashes or any other illegal characters for filenames. You only communicate by filenames. You do not output any other text",
         tools=[{"type": "retrieval"}],
         file_ids=[file_id],
         model="gpt-4-1106-preview"
