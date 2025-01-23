@@ -1,6 +1,4 @@
 import time
-import sys
-from datetime import datetime
 from cache import get_cached_filename, cache_md5sum, get_md5sum
 from openai import OpenAI
 client = OpenAI()
@@ -121,16 +119,14 @@ def list_files():
 def getAiGeneratedName(file_id):
     md5sum = get_md5sum(file_id)
     if get_cached_filename(md5sum):
-        print(f"{datetime.now()}  Cached filename: {get_cached_filename(md5sum)}", flush=True)
+        print(get_cached_filename(md5sum))
         return get_cached_filename(md5sum)
-    else:
-        print(f"{datetime.now()}  No cached filename for {md5sum} {file_id}", flush=True)
     id = upload_file(file_id)
-    print(f"{datetime.now()} Uploaded file: {file_id}", flush=True)
+    print(id)
     create_file_in_assistant(assistant_id, id)
     messages = create_thread(assistant_id)
     filename = messages.data[0].content[0].text.value
-    print(f"{datetime.now()} AI Generated Name: {filename}", flush=True)
+    print(filename)
     delete_file_in_assistant(assistant_id, id)
     delete_file(id)
     cache_md5sum(file_id, filename)
