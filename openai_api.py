@@ -11,44 +11,54 @@ def create_assistant(file_id):
     assistant = client.beta.assistants.create(
         name="PDF File Namer",
         instructions="You are a personal assistant. Look at PDF files and name them accordingly. Do not output any backslashes, forwardslashes or any other illegal characters for filenames. You only communicate by filenames. You do not output any other text",
-        tools=[{"type": "retrieval"}],
+        tools=[{"type":"retrieval"}],
         file_ids=[file_id],
-        model="gpt-4-1106-preview"
+        model="gpt-4o",
+        request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
     )
+    return assistant
 
 def create_file_in_assistant(assistant_id, file_id):
     file = client.beta.assistants.files.create(
         file_id=file_id,
-        assistant_id=assistant_id
+        assistant_id=assistant_id,
+        request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
     )
     return file
 
 def delete_file_in_assistant(assistant_id, file_id):
     file = client.beta.assistants.files.delete(
         file_id=file_id,
-        assistant_id=assistant_id
+        assistant_id=assistant_id,
+        request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
     )
     return file
+
 def create_thread(assistant_id):
-    thread = client.beta.threads.create()
+    thread = client.beta.threads.create(
+        request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
+    )
 
     message = client.beta.threads.messages.create(
         thread_id=thread.id,
         role="user",
-        content="I need a good name for this PDF file. You should only output the name without spaces and with underscores and not any other text. Do not output any backslashes, forwardslashes or any other illegal characters for filenames. Please do not output anything else."
+        content="I need a good name for this PDF file. You should only output the name without spaces and with underscores and not any other text. Do not output any backslashes, forwardslashes or any other illegal characters for filenames. Please do not output anything else.",
+        request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
     )
 
     run = client.beta.threads.runs.create(
         thread_id=thread.id,
         assistant_id=assistant_id,
-        instructions="Please address the user as Jagadguru. The user has a premium account."
+        instructions="Please address the user as Jagadguru. The user has a premium account.",
+        request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
     )
 
     time.sleep(5)
     
     run = client.beta.threads.runs.retrieve(
         thread_id=thread.id,
-        run_id=run.id
+        run_id=run.id,
+        request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
     )
 
     print(run.status)
@@ -56,7 +66,8 @@ def create_thread(assistant_id):
     while run.status == "in_progress":
         run = client.beta.threads.runs.retrieve(
             thread_id=thread.id,
-            run_id=run.id
+            run_id=run.id,
+            request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
         )
         print(run.status)
         time.sleep(5)
@@ -64,7 +75,8 @@ def create_thread(assistant_id):
         raise Exception(run.error)
     if run.status == "completed":
         messages = client.beta.threads.messages.list(
-        thread_id=thread.id
+            thread_id=thread.id,
+            request_options={"headers": {"OpenAI-Beta": "assistants=v2"}}
         )
         return messages
 
