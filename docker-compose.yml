@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  gptfilenamer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    volumes:
+      - ./cache.txt:/app/cache.txt
+      - ${INPUT_DIR:-./input}:/data
+    restart: "no" 

@@ -22,6 +22,10 @@ def process_file(file_path):
     # Make file searchable
     processed_file = makesearchable(file_path)
     
+    if processed_file is None:
+        log(f"Skipping file: {file_path} because it was not processed")
+        return
+    
     # Get AI generated name
     ai_name = getAiGeneratedName(processed_file)
     
@@ -87,7 +91,7 @@ def convert_to_pdf(image_path):
 
 def ocr_pdf(pdf_path):
     """
-    Run OCR on PDF file using pdf2pdfocr.py
+    Run OCR on PDF file using ocrmypdf (which is more reliable in Docker)
     """
     log(f"Running OCR on PDF: {pdf_path}")
     
@@ -99,31 +103,66 @@ def ocr_pdf(pdf_path):
     filebase = os.path.splitext(pdf_path)[0]
     ocr_path = filebase + '-OCR.pdf'
     
-    # Run OCR command
+    # Verify input file exists
+    if not os.path.exists(pdf_path):
+        log(f"Error: Input file does not exist: {pdf_path}")
+        return None
+    
+    # Run OCR command using ocrmypdf (installed through apt-get)
     try:
+        log(f"Executing ocrmypdf on: {pdf_path}")
         result = subprocess.run(
-            ['pdf2pdfocr/pdf2pdfocr.py', '-t', '-i', pdf_path], 
+            ['ocrmypdf', '--force-ocr', '--skip-text', pdf_path, ocr_path], 
             check=True, 
             stdout=subprocess.PIPE, 
             stderr=subprocess.PIPE
         )
-        log(result.stdout.decode())
+        log(f"OCR stdout: {result.stdout.decode()}")
         
         # Check if OCR file exists
         if os.path.exists(ocr_path):
             # Set timestamp and remove original if successful
             os.utime(ocr_path, (time_seconds, mtime_seconds))
             os.remove(pdf_path)
+            log(f"OCR completed successfully: {ocr_path}")
             return ocr_path
         else:
-            # If OCR file doesn't exist but command succeeded, rename original
-            os.rename(pdf_path, ocr_path)
-            os.utime(ocr_path, (time_seconds, mtime_seconds))
-            return ocr_path
+            # If OCR file doesn't exist but command succeeded, skip the file
+            log(f"OCR output file not found, trying alternative method")
+            
+            # Try with pdf2pdfocr as fallback
+            try:
+                pdf2pdfocr_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf2pdfocr", "pdf2pdfocr.py")
+                log(f"Trying pdf2pdfocr: {pdf2pdfocr_path}")
+                
+                # Create a temporary directory to handle pdf2pdfocr output
+                tmp_dir = os.path.join(os.path.dirname(pdf_path), "tmp")
+                os.makedirs(tmp_dir, exist_ok=True)
+                
+                result = subprocess.run(
+                    ["python", pdf2pdfocr_path, "-i", pdf_path, "-o", ocr_path, "-v"], 
+                    check=True, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE
+                )
+                log(f"pdf2pdfocr stdout: {result.stdout.decode()}")
+                
+                if os.path.exists(ocr_path):
+                    os.utime(ocr_path, (time_seconds, mtime_seconds))
+                    os.remove(pdf_path)
+                    log(f"pdf2pdfocr completed successfully: {ocr_path}")
+                    return ocr_path
+                else:
+                    log(f"No OCR method produced output, using original file")
+                    return pdf_path
+            except Exception as e:
+                log(f"pdf2pdfocr fallback failed: {str(e)}")
+                return pdf_path
             
     except subprocess.CalledProcessError as e:
         log(f"OCR process failed: {e}")
         log(f"Error output: {e.stderr.decode()}")
+        log(f"Continuing with original file: {pdf_path}")
         return pdf_path
     
 

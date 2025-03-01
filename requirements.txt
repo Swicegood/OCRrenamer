@@ -1,0 +1,7 @@
+Pillow
+reportlab
+bs4
+pyPDF2
+psutil
+openai
+packaging

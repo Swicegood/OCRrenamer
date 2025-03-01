@@ -1,3 +1,36 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Local data and cache
+input/
+cache.txt
+*.lock
+
+# Environment variables
+.env
+
+# Docker data
+.docker/
+docker-data/
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
 *.pdf
 *.pyc
 cache.*
@@ -8,10 +41,3 @@ cache.*
 *.pyc~
 *.pyo~
 *.pyd~
-__pycache__
-*.pyc
-*.pyo
-*.pyd
-*.pyw
-*.pyz
-venv/
