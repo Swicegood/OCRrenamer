@@ -1,3 +1,6 @@
 *.pdf
 *.pyc
 cache.*
+venv/
+__pycache__/
+
