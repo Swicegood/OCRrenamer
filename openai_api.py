@@ -115,7 +115,18 @@ def create_thread(assistant_id):
         )
         if run.status in ["completed", "failed"]:
             if run.status == "failed":
-                raise Exception(f"Run failed: {run.error}")
+                # Safely handle the case where run.error might not exist
+                error_message = getattr(run, 'error', {'message': 'Unknown error occurred'})
+                if isinstance(error_message, dict) and 'message' in error_message:
+                    error_details = error_message['message']
+                else:
+                    error_details = str(error_message)
+                
+                log_message = f"Run failed: {error_details}"
+                print(f"OpenAI API error: {log_message}")
+                
+                # Return a default filename instead of raising an exception
+                return f"api_error_file_{int(time.time())}"
             break
         time.sleep(5)
 
@@ -163,11 +174,15 @@ def getAiGeneratedName(file_path):
         print(cached)
         return cached
 
-    # Step 1: Upload file so it's in user library
-    file_id = upload_file(file_path)
-    print("Uploaded file_id:", file_id)
-
+    # Set a default name in case of errors
+    default_name = f"file_{int(time.time())}"
+    file_id = None
+    
     try:
+        # Step 1: Upload file so it's in user library
+        file_id = upload_file(file_path)
+        print("Uploaded file_id:", file_id)
+
         # Step 2: Create vector store & ingest file
         vs_id = create_vector_store_and_ingest(file_id)
         print("Created vector store:", vs_id)
@@ -181,8 +196,6 @@ def getAiGeneratedName(file_path):
 
         # The assistant's recommended filename will (hopefully) appear
         # in the first assistant message, or possibly a later message.
-        # This is just an example picking the first message.
-        # Adjust as needed based on your actual conversation flow.
         filename = None
         for msg in messages.data:
             if msg.role == "assistant":
@@ -191,9 +204,10 @@ def getAiGeneratedName(file_path):
                     break
 
         if not filename:
-            filename = f"pdf_file_{int(time.time())}"
-
-        print("Proposed filename:", filename)
+            filename = default_name
+            print("No valid filename generated, using default:", filename)
+        else:
+            print("Proposed filename:", filename)
 
         # Step 5 (Optional): If you'd like to fully remove references in your
         # v2 data, you could remove the vector store or detach it. For example:
@@ -201,16 +215,30 @@ def getAiGeneratedName(file_path):
 
         # You can also do practice housekeeping by removing the file from
         # your library:
-        delete_file(file_id)
+        if file_id:
+            try:
+                delete_file(file_id)
+            except Exception as e:
+                print(f"Warning: Could not delete file {file_id}: {str(e)}")
 
         # Step 6: Cache for future calls
         cache_md5sum(file_path, filename)
         return filename
 
     except Exception as e:
+        print(f"Error in AI naming process: {str(e)}")
         # Cleanup if something fails
-        delete_file(file_id)
-        raise e
+        if file_id:
+            try:
+                delete_file(file_id)
+            except:
+                pass  # Suppress errors in cleanup during error handling
+                
+        # Return a fallback name that's at least unique
+        fallback_name = f"file_{int(time.time())}"
+        print(f"Using fallback name due to error: {fallback_name}")
+        cache_md5sum(file_path, fallback_name)  # Cache the fallback too
+        return fallback_name
 
 if __name__ == "__main__":
     generated_name = getAiGeneratedName('/mnt/y/My Drive/Brother (1)/Scan2023-10-21_130607.pdf')
