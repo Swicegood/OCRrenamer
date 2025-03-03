@@ -1,18 +1,32 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+# Import all modules at the top level
 import os
 import sys
 import subprocess
 import time
 import tempfile
 from datetime import datetime
-import PyPDF2
-from PIL import Image
 import io
 from openai_api import getAiGeneratedName
+
+# Try to import optional modules
+try:
+    from PIL import Image
+except ImportError:
+    Image = None
 
 try:
     import PyPDF2
 except ImportError:
     PyPDF2 = None
+
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+except ImportError:
+    pass
 
 def log(message):
     """
@@ -213,268 +227,438 @@ def check_page_orientation(pdf_path):
                 '-'  # Output to stdout
             ]
             
-            # Check orientation of extracted pages
-            page_files = sorted([f for f in os.listdir(tmp_dir) if f.startswith('page')])
-            rotated_pages = 0
-            total_checked = 0
+            result = subprocess.run(
+                text_cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
             
-            for page_file in page_files:
-                page_path = os.path.join(tmp_dir, page_file)
+            extracted_text = result.stdout.strip()
+            
+            # Check for common English words as a simple heuristic
+            common_words = ['the', 'and', 'for', 'that', 'with', 'this', 'from', 'have', 'are', 'not']
+            words_found = sum(1 for word in common_words if f" {word} " in f" {extracted_text.lower()} ")
+            
+            log(f"Found {words_found} common words in extracted text of length {len(extracted_text)}")
+            
+            # If we find more than 2 common words, text is likely properly oriented
+            if words_found >= 2:
+                log(f"Text appears properly oriented based on word recognition")
+                return True
+            
+            # If text is substantial but has few common words, it might be poorly oriented
+            if len(extracted_text) > 500 and words_found < 2:
+                log(f"Text may be improperly oriented (substantial text but few recognizable words)")
+                return False
                 
-                # Run tesseract with orientation detection only (no OCR)
+        except Exception as e:
+            log(f"Text quality check failed: {str(e)}")
+            
+        # Try a safer method to detect orientation using image-based analysis
+        # This avoids the tesseract --psm 0 failure
+        try:
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                # Extract first page as image
+                extract_cmd = [
+                    'pdftoppm', 
+                    '-png',
+                    '-f', '1',  # Start from page 1
+                    '-l', '1',  # Just the first page
+                    pdf_path, 
+                    f"{tmp_dir}/page"
+                ]
+                subprocess.run(extract_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                # Find the page file
+                page_files = [f for f in os.listdir(tmp_dir) if f.startswith('page')]
+                if not page_files:
+                    log("No page images extracted, can't check orientation")
+                    return False
+                    
+                page_path = os.path.join(tmp_dir, page_files[0])
+                
+                # Use tesseract with a more reliable mode
+                # PSM 1 = Automatic page segmentation with OSD
+                # PSM 3 = Fully automatic page segmentation, but no OSD (more reliable)
                 result = subprocess.run(
                     [
                         'tesseract', 
                         page_path, 
                         'stdout',
-                        '--psm', '0',  # Orientation and script detection only
-                        '-c', 'page_separator=""'
+                        '--psm', '3',  # Fully automatic page segmentation
+                        '-l', 'eng'
                     ],
-                    check=True,
+                    check=False,  # Don't fail on non-zero exit
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True
                 )
                 
-                # Parse the orientation information from stderr
-                stderr = result.stderr
-                rotation_info = None
+                # Check the quality of the output
+                ocr_text = result.stdout.strip()
+                common_words = ['the', 'and', 'for', 'that', 'with', 'this', 'from', 'have', 'are', 'not']
+                words_found = sum(1 for word in common_words if f" {word} " in f" {ocr_text.lower()} ")
                 
-                for line in stderr.splitlines():
-                    if "Orientation:" in line:
-                        rotation_info = line
-                        break
+                log(f"OCR found {words_found} common words in first page")
                 
-                if rotation_info:
-                    log(f"Page {page_file} orientation info: {rotation_info}")
-                    # If orientation is not 0 degrees, page needs rotation
-                    if "Orientation: 0" not in rotation_info:
-                        rotated_pages += 1
-                
-                total_checked += 1
-                
-                # Early exit if we've already found a rotated page
-                if rotated_pages > 0:
-                    break
-            
-            # If any pages need rotation, return False (needs correction)
-            if rotated_pages > 0:
-                log(f"Detected {rotated_pages}/{total_checked} pages with incorrect orientation")
-                return False
-            
-            # Try a second method: check if text extraction yields valid words
-            try:
-                # Extract text from the first page
-                text_cmd = [
-                    'pdftotext',
-                    '-f', '1',  # First page
-                    '-l', '1',  # First page
-                    pdf_path,
-                    '-'  # Output to stdout
-                ]
-                
-                result = subprocess.run(
-                    text_cmd,
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True
-                )
-                
-                extracted_text = result.stdout.strip()
-                
-                # Check for common English words as a simple heuristic
-                # If we can find some common words, orientation is likely correct
-                common_words = ['the', 'and', 'for', 'that', 'with', 'this', 'from']
-                words_found = sum(1 for word in common_words if f" {word} " in f" {extracted_text.lower()} ")
-                
-                log(f"Found {words_found} common words in extracted text")
-                
-                if words_found >= 2:
-                    log(f"Text appears properly oriented based on word recognition")
+                # If we find more than 1 common word, assume orientation is good
+                if words_found > 1:
+                    log(f"Page orientation appears correct based on OCR")
                     return True
-                elif len(extracted_text) < 100:
-                    # Very little text, can't make a determination
-                    log(f"Too little text to determine orientation quality")
+                elif len(ocr_text) < 50:
+                    # Very little text detected
+                    log(f"Too little OCR text to determine orientation")
                     return True  # Assume it's fine if there's very little text
                 else:
-                    # Substantial text but few recognizable words - likely poor orientation
-                    log(f"Text may be improperly oriented (few recognizable words)")
+                    # Text detected but few common words - might need rotation
+                    log(f"Page may need rotation (OCR found text but few common words)")
                     return False
-                    
-            except Exception as e:
-                log(f"Text quality check failed: {str(e)}")
                 
-            # Default to assuming orientation is correct if we couldn't determine otherwise
-            log(f"No rotation issues detected, orientation appears correct")
-            return True
+        except Exception as e:
+            log(f"Image-based orientation check failed: {str(e)}")
+            
+        # If text was found earlier but orientation is unclear, lean toward processing it
+        log(f"Orientation check inconclusive but text exists, assuming needs OCR")
+        return False
             
     except Exception as e:
         log(f"Orientation check failed: {str(e)}")
         # If we can't determine orientation, assume we need OCR to be safe
         return False
 
-def ocr_pdf(pdf_path):
+def fix_pdf_orientation(pdf_path):
     """
-    Run OCR on PDF file if it doesn't already have text or if text orientation is wrong
-    Returns the path to the OCR'd PDF or the original if already properly OCR'd
+    Check if PDF needs rotation and fix orientation if needed.
+    Returns the path to the fixed PDF or the original path if no rotation was needed.
     """
-    log(f"Evaluating PDF for OCR: {pdf_path}")
+    log(f"Checking if PDF needs orientation correction: {pdf_path}")
     
-    # Two-step check:
-    # 1. Check if PDF has any text
-    has_text = is_already_ocrd(pdf_path)
-    
-    # 2. If it has text, check if the orientation is correct
-    if has_text:
-        correct_orientation = check_page_orientation(pdf_path)
+    # Check if orientation needs fixing
+    if check_page_orientation(pdf_path):
+        log(f"PDF orientation appears correct, no rotation needed: {pdf_path}")
+        return pdf_path
         
-        if correct_orientation:
-            log(f"PDF already has correctly oriented text, skipping OCR: {pdf_path}")
-            return pdf_path
-        else:
-            log(f"PDF has text but orientation appears incorrect, proceeding with OCR and rotation")
-    else:
-        log(f"PDF has no text, OCR needed: {pdf_path}")
+    log(f"PDF orientation needs correction, applying rotation: {pdf_path}")
+    
+    # Create output path for rotated file
+    filebase = os.path.splitext(pdf_path)[0]
+    rotated_path = filebase + '-rotated.pdf'
     
     # Preserve file timestamps
     mtime_seconds = os.path.getmtime(pdf_path)
     time_seconds = time.time()
     
-    # Create output path
-    filebase = os.path.splitext(pdf_path)[0]
-    ocr_path = filebase + '-OCR.pdf'
-    
-    # Verify input file exists
-    if not os.path.exists(pdf_path):
-        log(f"Error: Input file does not exist: {pdf_path}")
-        return None
-    
-    # Run OCR command using ocrmypdf with orientation correction
     try:
-        log(f"Executing ocrmypdf with auto-rotation on: {pdf_path}")
-        result = subprocess.run(
-            [
-                'ocrmypdf',
-                '--rotate-pages',     # Auto-rotate pages based on detected text orientation
-                '--deskew',           # Straighten text
-                '--force-ocr',        # Force OCR even if text is already present
-                pdf_path, 
-                ocr_path
-            ], 
-            check=True, 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE
-        )
-        log(f"OCR stdout: {result.stdout.decode()}")
-        
-        # Check if OCR file exists
-        if os.path.exists(ocr_path):
-            # Set timestamp and remove original if successful
-            os.utime(ocr_path, (time_seconds, mtime_seconds))
-            os.remove(pdf_path)
-            log(f"OCR completed successfully: {ocr_path}")
-            return ocr_path
-        else:
-            # If OCR file doesn't exist but command succeeded, try alternative
-            log(f"OCR output file not found, trying alternative method")
-            
-            # Try a different ocrmypdf approach with orientation correction
-            try:
-                log(f"Trying ocrmypdf with redo-ocr and orientation correction")
-                result = subprocess.run(
-                    [
-                        'ocrmypdf',
-                        '--rotate-pages',
-                        '--deskew',
-                        '--redo-ocr',
-                        pdf_path, 
-                        ocr_path
-                    ],
-                    check=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE
-                )
+        # Try using pdftk first (more reliable for PDF manipulation)
+        try:
+            log(f"Attempting rotation with pdftk")
+            # First determine orientation using pdftotext and tesseract
+            rotation_angle = 0
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                # Extract first page as image
+                extract_cmd = [
+                    'pdftoppm',
+                    '-png',
+                    '-f', '1',  # First page
+                    '-l', '1',  # First page
+                    '-r', '150',  # Resolution
+                    pdf_path,
+                    f"{tmp_dir}/page"
+                ]
+                subprocess.run(extract_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
                 
-                if os.path.exists(ocr_path):
-                    os.utime(ocr_path, (time_seconds, mtime_seconds))
-                    os.remove(pdf_path)
-                    log(f"OCR alternative method completed successfully: {ocr_path}")
-                    return ocr_path
-                else:
-                    # Fall back to original file
-                    log(f"No OCR method produced output, using original file")
-                    return pdf_path
-            except Exception as e:
-                log(f"OCR alternative method failed: {str(e)}")
-                
-            # Try with tesseract directly as a final fallback for orientation issues
-            try:
-                log(f"Trying tesseract directly for better orientation control")
-                # Create a temporary directory for page images
-                import tempfile
-                with tempfile.TemporaryDirectory() as tmp_dir:
-                    # Extract pages as images
-                    extract_cmd = [
-                        'pdftoppm', 
-                        '-png', 
-                        pdf_path, 
-                        f"{tmp_dir}/page"
-                    ]
-                    subprocess.run(extract_cmd, check=True)
-                    
-                    # Process each image with tesseract with orientation detection
-                    from reportlab.lib.pagesizes import letter
-                    from reportlab.pdfgen import canvas
-                    import os
-                    
-                    # Create a new PDF
-                    c = canvas.Canvas(ocr_path, pagesize=letter)
-                    c.setTitle(os.path.basename(pdf_path))
-                    
-                    # Process each page
-                    page_files = sorted([f for f in os.listdir(tmp_dir) if f.startswith('page')])
-                    for page_file in page_files:
-                        page_path = os.path.join(tmp_dir, page_file)
-                        
-                        # Run tesseract with orientation detection
-                        tess_out = os.path.join(tmp_dir, f"tess_{page_file}")
-                        tess_cmd = [
+                # Find the page file
+                page_files = [f for f in os.listdir(tmp_dir) if f.startswith('page')]
+                if page_files:
+                    page_path = os.path.join(tmp_dir, page_files[0])
+                    # Use tesseract to detect orientation
+                    result = subprocess.run(
+                        [
                             'tesseract',
                             page_path,
-                            tess_out.replace('.png', ''),  # tesseract adds extension
-                            '-l', 'eng',
-                            '--psm', '1',  # Auto page segmentation with OSD (orientation detection)
-                            'pdf'  # Output format
-                        ]
-                        subprocess.run(tess_cmd, check=True)
-                        
-                        # Add the processed page to our PDF
-                        # (using the original image but with text layer from tesseract)
-                        from PIL import Image
-                        img = Image.open(page_path)
-                        width, height = img.size
-                        c.setPageSize((width, height))
-                        c.drawImage(page_path, 0, 0, width, height)
-                        c.showPage()
+                            'stdout',
+                            '--psm', '0',  # Orientation and script detection only
+                        ],
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
                     
-                    c.save()
-                    
-                    if os.path.exists(ocr_path):
-                        os.utime(ocr_path, (time_seconds, mtime_seconds))
-                        os.remove(pdf_path)
-                        log(f"Tesseract OCR completed successfully: {ocr_path}")
-                        return ocr_path
-            except Exception as e:
-                log(f"pdf2pdfocr fallback failed: {str(e)}")
-                return None
+                    # Parse orientation from tesseract output
+                    for line in result.stderr.splitlines():
+                        if "Orientation in degrees:" in line:
+                            try:
+                                rotation_angle = int(line.split(":")[1].strip())
+                                break
+                            except:
+                                pass
             
-    except subprocess.CalledProcessError as e:
-        log(f"OCR process failed: {e}")
-        log(f"Error output: {e.stderr.decode()}")
-        log(f"Skipping file: {pdf_path}")
-        return None
+            if rotation_angle != 0:
+                # Use pdftk to rotate the PDF
+                rotate_cmd = [
+                    'pdftk',
+                    pdf_path,
+                    'rotate',
+                    f'{rotation_angle}east',  # east for clockwise rotation
+                    'output',
+                    rotated_path
+                ]
+                subprocess.run(rotate_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                
+                # Validate the rotated PDF
+                if validate_pdf(rotated_path):
+                    os.utime(rotated_path, (time_seconds, mtime_seconds))
+                    log(f"Rotation successful with pdftk: {rotated_path}")
+                    return rotated_path
+                else:
+                    log(f"Pdftk rotation produced invalid PDF, trying alternative method")
+                    if os.path.exists(rotated_path):
+                        os.remove(rotated_path)
+        except Exception as e:
+            log(f"Pdftk rotation failed: {str(e)}")
+        
+        # If pdftk fails, try qpdf (another reliable PDF tool)
+        try:
+            log(f"Attempting rotation with qpdf")
+            rotate_cmd = [
+                'qpdf',
+                '--rotate=+90',  # Try 90-degree rotation
+                pdf_path,
+                rotated_path
+            ]
+            subprocess.run(rotate_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            # Validate the rotated PDF
+            if validate_pdf(rotated_path):
+                os.utime(rotated_path, (time_seconds, mtime_seconds))
+                log(f"Rotation successful with qpdf: {rotated_path}")
+                return rotated_path
+            else:
+                log(f"Qpdf rotation produced invalid PDF")
+                if os.path.exists(rotated_path):
+                    os.remove(rotated_path)
+        except Exception as e:
+            log(f"Qpdf rotation failed: {str(e)}")
+        
+        # If all else fails, try using ocrmypdf just for rotation
+        try:
+            log(f"Attempting rotation with ocrmypdf")
+            result = subprocess.run(
+                [
+                    'ocrmypdf',
+                    '--rotate-pages',
+                    '--skip-text',  # Don't do OCR, just rotation
+                    '--jobs', '1',
+                    pdf_path,
+                    rotated_path
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Validate the rotated PDF
+            if validate_pdf(rotated_path):
+                os.utime(rotated_path, (time_seconds, mtime_seconds))
+                log(f"Rotation successful with ocrmypdf: {rotated_path}")
+                return rotated_path
+            else:
+                log(f"Ocrmypdf rotation produced invalid PDF")
+                if os.path.exists(rotated_path):
+                    os.remove(rotated_path)
+        except Exception as e:
+            log(f"Ocrmypdf rotation failed: {str(e)}")
+        
+        # If all rotation attempts failed, return original
+        log(f"All rotation methods failed, using original: {pdf_path}")
+        return pdf_path
+            
+    except Exception as e:
+        log(f"Error in rotation process: {str(e)}")
+        # Clean up any failed output
+        if os.path.exists(rotated_path):
+            try:
+                os.remove(rotated_path)
+            except:
+                pass
+        log(f"Continuing with original file: {pdf_path}")
+        return pdf_path
+
+def validate_pdf(pdf_path):
+    """
+    Validate that a PDF file exists and can be opened.
+    Returns True if valid, False otherwise.
+    """
+    if not os.path.exists(pdf_path):
+        log(f"PDF file does not exist: {pdf_path}")
+        return False
+        
+    try:
+        with open(pdf_path, 'rb') as f:
+            try:
+                reader = PyPDF2.PdfReader(f)
+                num_pages = len(reader.pages)
+                if num_pages == 0:
+                    log(f"PDF has no pages: {pdf_path}")
+                    return False
+                log(f"PDF validation successful: {num_pages} pages")
+                return True
+            except Exception as e:
+                log(f"Error reading PDF: {str(e)}")
+                return False
+    except Exception as e:
+        log(f"Error opening PDF: {str(e)}")
+        return False
+
+def try_rotation_angle(pdf_path, angle, output_path):
+    """
+    Try rotating a PDF by a specific angle.
+    Returns True if rotation was successful and produced valid PDF.
+    """
+    try:
+        rotate_cmd = [
+            'pdftk',
+            pdf_path,
+            'rotate',
+            f'{angle}east',  # east for clockwise rotation
+            'output',
+            output_path
+        ]
+        subprocess.run(rotate_cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        
+        # Validate the rotated PDF
+        if validate_pdf(output_path):
+            return True
+    except Exception as e:
+        log(f"Rotation by {angle} degrees failed: {str(e)}")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+    return False
+
+def fix_orientation_and_ocr(pdf_path):
+    """
+    Iteratively fix orientation and OCR until we get good text.
+    Returns the path to the final processed PDF.
+    """
+    log(f"Starting orientation and OCR process for: {pdf_path}")
     
+    # Keep track of attempts to avoid infinite loops
+    max_attempts = 4  # Maximum number of rotation attempts
+    attempts = 0
+    current_path = pdf_path
+    
+    while attempts < max_attempts:
+        # Check if current orientation has good text
+        has_text = is_already_ocrd(current_path)
+        if has_text:
+            correct_orientation = check_page_orientation(current_path)
+            if correct_orientation:
+                log(f"Found good text orientation after {attempts} attempts")
+                return current_path
+        
+        # Try next rotation if needed
+        attempts += 1
+        log(f"Attempt {attempts}: Current text quality not good, trying rotation")
+        
+        # Create paths for this attempt
+        filebase = os.path.splitext(current_path)[0]
+        rotated_path = f"{filebase}-rot{attempts}.pdf"
+        ocr_path = f"{filebase}-rot{attempts}-ocr.pdf"
+        
+        # Try different rotation angles
+        rotation_successful = False
+        for angle in [90, 180, 270]:
+            if try_rotation_angle(current_path, angle, rotated_path):
+                rotation_successful = True
+                break
+        
+        if not rotation_successful:
+            log(f"All rotation angles failed on attempt {attempts}")
+            return current_path
+        
+        # Now OCR the rotated file
+        try:
+            log(f"Running OCR on rotated file (attempt {attempts})")
+            result = subprocess.run(
+                [
+                    'ocrmypdf',
+                    '--deskew',
+                    '--force-ocr',
+                    '--jobs', '1',
+                    '--output-type', 'pdf',
+                    '--skip-big', '0',
+                    rotated_path,
+                    ocr_path
+                ],
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # Clean up the intermediate rotated file
+            if os.path.exists(rotated_path):
+                os.remove(rotated_path)
+            
+            # Check if OCR was successful
+            if os.path.exists(ocr_path) and validate_pdf(ocr_path):
+                # Clean up the previous file if it's not the original
+                if current_path != pdf_path and os.path.exists(current_path):
+                    os.remove(current_path)
+                current_path = ocr_path
+            else:
+                log(f"OCR failed on attempt {attempts}")
+                if os.path.exists(ocr_path):
+                    os.remove(ocr_path)
+                return current_path
+            
+        except Exception as e:
+            log(f"OCR failed on attempt {attempts}: {str(e)}")
+            if os.path.exists(ocr_path):
+                os.remove(ocr_path)
+            return current_path
+    
+    log(f"Reached maximum rotation attempts ({max_attempts})")
+    return current_path
+
+def ocr_pdf(pdf_path):
+    """
+    Run OCR on PDF file, handling orientation issues iteratively.
+    Returns the path to the OCR'd PDF or the original if processing fails.
+    """
+    log(f"Evaluating PDF for OCR: {pdf_path}")
+    
+    # Validate PDF first
+    if not validate_pdf(pdf_path):
+        log(f"Invalid PDF file, skipping OCR: {pdf_path}")
+        return pdf_path
+    
+    # Preserve timestamps
+    mtime_seconds = os.path.getmtime(pdf_path)
+    time_seconds = time.time()
+    
+    try:
+        # Process the file with combined rotation and OCR
+        result_path = fix_orientation_and_ocr(pdf_path)
+        
+        # If processing was successful and produced a different file
+        if result_path != pdf_path:
+            # Restore timestamps
+            os.utime(result_path, (time_seconds, mtime_seconds))
+            # Remove original if we created a new file
+            if os.path.exists(pdf_path):
+                os.remove(pdf_path)
+            log(f"Processing completed successfully: {result_path}")
+        else:
+            log(f"No improvements made, keeping original file")
+            
+        return result_path
+        
+    except Exception as e:
+        log(f"Error in OCR process: {str(e)}")
+        return pdf_path
 
 if __name__ == "__main__":
     # Check if a directory path was provided

@@ -8,6 +8,8 @@ RUN apt-get update && apt-get install -y \
     tesseract-ocr \
     tesseract-ocr-eng \
     ghostscript \
+    pdftk-java \
+    qpdf \
     build-essential \
     git \
     ocrmypdf \
@@ -24,7 +26,8 @@ WORKDIR /app
 
 # Copy requirements file and install Python dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt \
+    && pip install --no-cache-dir PyPDF2
 
 # Clone pdf2pdfocr repository (needed for OCR functionality)
 RUN git clone https://github.com/LeoFCardoso/pdf2pdfocr.git && \
