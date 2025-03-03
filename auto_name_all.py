@@ -4,6 +4,7 @@ import subprocess
 import time
 import tempfile
 from datetime import datetime
+import PyPDF2
 from PIL import Image
 import io
 from openai_api import getAiGeneratedName
@@ -64,6 +65,8 @@ def makesearchable(file_path):
     
     # Process PDF with OCR
     if ext == '.pdf':
+        # First check and correct orientation
+        file_path = fix_pdf_orientation(file_path)
         return ocr_pdf(file_path)
     
     # If not a supported format, return the original path
@@ -477,12 +480,14 @@ if __name__ == "__main__":
     # Check if a directory path was provided
     if len(sys.argv) != 2:
         log("Usage: python script.py <directory_path>")
+        log("Usage: python script.py <directory_path>")
         sys.exit(1)
 
     directory_path = sys.argv[1]
 
     # Verify that the provided path is a directory
     if not os.path.isdir(directory_path):
+        log("The provided path is not a directory.")
         log("The provided path is not a directory.")
         sys.exit(1)
 
@@ -512,10 +517,12 @@ if __name__ == "__main__":
                     process_file(file_path)
         else:
             log("No Scan...pdf file found in the directory. Doing nothing.")
+            log("No Scan...pdf file found in the directory. Doing nothing.")
 
         # Remove the lock file when done
         os.remove(lock_file_path)
     else:
+        log("The script is already running or the lock file was not properly removed.")
         log("The script is already running or the lock file was not properly removed.")
     
     
