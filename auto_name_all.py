@@ -50,7 +50,7 @@ def process_file(file_path):
     
     # Make file world readable and writable
     os.chmod(processed_file, 0o666)
-
+    
     # Get AI generated name
     ai_name = getAiGeneratedName(processed_file)
     
@@ -583,18 +583,18 @@ def fix_orientation_and_ocr(pdf_path):
         try:
             log(f"Running OCR on rotated file (attempt {attempts})")
             result = subprocess.run(
-                [
-                    'ocrmypdf',
-                    '--deskew',
-                    '--force-ocr',
-                    '--jobs', '1',
-                    '--output-type', 'pdf',
-                    '--skip-big', '0',
-                    rotated_path,
-                    ocr_path
-                ],
-                check=True,
-                stdout=subprocess.PIPE,
+                    [
+                        'ocrmypdf',
+                        '--deskew',
+                        '--force-ocr',
+                        '--jobs', '1',
+                        '--output-type', 'pdf',
+                        '--skip-big', '0',
+                        rotated_path,
+                        ocr_path
+                    ],
+                check=True, 
+                stdout=subprocess.PIPE, 
                 stderr=subprocess.PIPE
             )
             
@@ -701,12 +701,10 @@ if __name__ == "__main__":
                     process_file(file_path)
         else:
             log("No Scan...pdf file found in the directory. Doing nothing.")
-            log("No Scan...pdf file found in the directory. Doing nothing.")
 
         # Remove the lock file when done
         os.remove(lock_file_path)
     else:
-        log("The script is already running or the lock file was not properly removed.")
         log("The script is already running or the lock file was not properly removed.")
     
     

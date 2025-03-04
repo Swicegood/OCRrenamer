@@ -2,243 +2,78 @@ import time
 from cache import get_cached_filename, cache_md5sum, get_md5sum
 from openai import OpenAI
 
-# This client will use v2 of the Assistants API by default.
-client = OpenAI(default_headers={"OpenAI-Beta": "assistants=v2"})
+# Initialize OpenAI client
+client = OpenAI()
 
-assistant_id = "asst_x12T5oG4veSRKIhgeJkw7303"
-
-def upload_file(file_path):
+def get_name_from_text(text_content):
     """
-    This function uploads a file to OpenAI and returns the file ID.
+    Get a filename suggestion using chat completion based on text content.
+    Much more efficient than using the assistants API with file uploads.
     """
-    with open(file_path, 'rb') as file:
-        response = client.files.create(file=file, purpose='assistants')
-    return response.id
-
-def delete_file(file_id):
-    """
-    This function deletes a file from the user's file library.
-    Deleting a file from the library removes it from all v1 and v2 references.
-    """
-    response = client.files.delete(file_id)
-    return response
-
-def list_files():
-    """
-    This function lists all files in the user's library.
-    """
-    response = client.files.list()
-    return response.data
-
-def create_vector_store_and_ingest(file_id):
-    """
-    In v2, we attach files to the 'file_search' tool by creating a vector store
-    that references the files directly with the file_ids parameter. Since the
-    creation is asynchronous, we'll poll until the vector store is 'completed'
-    or 'failed'.
-    """
-    # 1) Create a new vector store, inserting the file_id during creation:
-    vs = client.beta.vector_stores.create(
-        file_ids=[file_id]
-    )
-
-    # 2) Poll until ingestion is done
-    while True:
-        polled_vs = client.beta.vector_stores.retrieve(
-            vs.id
+    try:
+        completion = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a file naming assistant. Generate a descriptive filename based on the content provided. Use only alphanumeric characters and underscores. Do not include spaces or special characters. Do not include any explanation, just output the filename without extension."},
+                {"role": "user", "content": text_content}
+            ],
+            max_tokens=50,  # We only need a short response
+            temperature=0.7  # Some creativity but not too random
         )
-        if polled_vs.status in ["completed", "failed"]:
-            if polled_vs.status == "failed":
-                raise Exception("File ingestion failed.")
-            break
-        time.sleep(2)
+        
+        filename = completion.choices[0].message.content.strip()
+        print("Generated filename:", filename)
+        return filename
+    except Exception as e:
+        print(f"Error generating filename: {str(e)}")
+        return f"file_{int(time.time())}"
 
-    return vs.id
-
-def create_assistant(vector_store_id=None):
+def extract_text_from_pdf(pdf_path):
     """
-    In v2, we create an assistant using 'tools' plus 'tool_resources'.
-    We now use 'file_search' instead of 'retrieval'.
-    If we want to associate a vector store at creation time, provide it in tool_resources.
+    Extract text content from a PDF using pdftotext.
+    Returns the extracted text or None if extraction fails.
     """
-    tools = [{"type": "file_search"}]  # previously 'retrieval'
-    # Optionally attach the vector store to the assistant:
-    if vector_store_id is not None:
-        tool_resources = {
-            "file_search": {
-                "vector_store_ids": [vector_store_id]
-            }
-        }
-    else:
-        tool_resources = {}
-
-    assistant = client.beta.assistants.create(
-        name="PDF File Namer (v2)",
-        instructions=(
-            "You are a personal assistant. Look at PDF files and name them accordingly. "
-            "You only communicate by filenames. You do not output any other text."
-        ),
-        tools=tools,
-        tool_resources=tool_resources,
-        model="gpt-4o"
-    )
-    return assistant
-
-def create_thread(assistant_id):
-    """
-    Threads in v2 can also have 'tools' and 'tool_resources'; if the thread needs
-    direct access to a vector store or code interpreter tools, you can attach them here.
-    """
-    thread = client.beta.threads.create(
-    )
-
-    # Attach a user message. Note that in v2, if you need to attach files directly
-    # to this message, you would do so via the 'attachments' parameter.
-    message = client.beta.threads.messages.create(
-        thread_id=thread.id,
-        role="user",
-        content="I need a good name for this PDF file. You should only output the name without spaces and with underscores and not any other text. Do not output any illegal characters."
-    )
-
-    # Create a run
-    run = client.beta.threads.runs.create(
-        thread_id=thread.id,
-        assistant_id=assistant_id,
-        instructions="Please address the user as Jagadguru. The user has a premium account."
-    )
-
-    # Wait for the run to finish
-    while True:
-        run = client.beta.threads.runs.retrieve(
-            thread_id=thread.id,
-            run_id=run.id
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['pdftotext', pdf_path, '-'],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True
         )
-        if run.status in ["completed", "failed"]:
-            if run.status == "failed":
-                # Safely handle the case where run.error might not exist
-                error_message = getattr(run, 'error', {'message': 'Unknown error occurred'})
-                if isinstance(error_message, dict) and 'message' in error_message:
-                    error_details = error_message['message']
-                else:
-                    error_details = str(error_message)
-                
-                log_message = f"Run failed: {error_details}"
-                print(f"OpenAI API error: {log_message}")
-                
-                # Return a default filename instead of raising an exception
-                return f"api_error_file_{int(time.time())}"
-            break
-        time.sleep(5)
-
-    # Fetch messages from the thread
-    messages = client.beta.threads.messages.list(
-        thread_id=thread.id
-    )
-    return messages
-
-def print_messages(messages):
-    """
-    Helper to print out message text content.
-    """
-    for message in messages:
-        for content in message.content:
-            print(content.text.value)
-
-def test_poetic_completion():
-    """
-    Example function not changed significantly for v2 – simple chat completion usage remains the same.
-    """
-    completion = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a poetic assistant, skilled in explaining programming concepts with creative flair."},
-            {"role": "user", "content": "Compose a poem that explains the concept of recursion in programming."}
-        ]
-    )
-    print(completion.choices[0].message)
+        return result.stdout.strip()
+    except Exception as e:
+        print(f"Error extracting text from PDF: {str(e)}")
+        return None
 
 def getAiGeneratedName(file_path):
     """
-    Main function:
-    1) Check if we have a cached name for this file based on its md5.
-    2) If not, upload the file, create a vector store, ingest the file into that store.
-    3) Create an assistant referencing that vector store.
-    4) Create a thread, run it, fetch the AI's PDF name recommendation.
-    5) Remove the vector store reference if desired (cleanup).
-    6) Cache the name under the file's md5, and return it.
+    Get an AI-generated name for a file based on its content.
+    Now uses text extraction and chat completion instead of assistants API.
     """
-
     md5sum = get_md5sum(file_path)
     cached = get_cached_filename(md5sum)
     if cached:
-        print(cached)
+        print("Using cached name:", cached)
         return cached
 
-    # Set a default name in case of errors
-    default_name = f"file_{int(time.time())}"
-    file_id = None
+    # Extract text from PDF
+    text_content = extract_text_from_pdf(file_path)
     
-    try:
-        # Step 1: Upload file so it's in user library
-        file_id = upload_file(file_path)
-        print("Uploaded file_id:", file_id)
-
-        # Step 2: Create vector store & ingest file
-        vs_id = create_vector_store_and_ingest(file_id)
-        print("Created vector store:", vs_id)
-
-        # Step 3: Create an assistant with reference to that vector store
-        assistant = create_assistant(vector_store_id=vs_id)
-        print("Assistant created (v2):", assistant.id)
-
-        # Step 4: Create a thread and let the assistant name the PDF
-        messages = create_thread(assistant.id)
-
-        # The assistant's recommended filename will (hopefully) appear
-        # in the first assistant message, or possibly a later message.
-        filename = None
-        for msg in messages.data:
-            if msg.role == "assistant":
-                if msg.content and len(msg.content) > 0:
-                    filename = msg.content[0].text.value
-                    break
-
-        if not filename:
-            filename = default_name
-            print("No valid filename generated, using default:", filename)
-        else:
-            print("Proposed filename:", filename)
-
-        # Step 5 (Optional): If you'd like to fully remove references in your
-        # v2 data, you could remove the vector store or detach it. For example:
-        # client.beta.vector_stores.delete(vs_id)
-
-        # You can also do practice housekeeping by removing the file from
-        # your library:
-        if file_id:
-            try:
-                delete_file(file_id)
-            except Exception as e:
-                print(f"Warning: Could not delete file {file_id}: {str(e)}")
-
-        # Step 6: Cache for future calls
-        cache_md5sum(file_path, filename)
-        return filename
-
-    except Exception as e:
-        print(f"Error in AI naming process: {str(e)}")
-        # Cleanup if something fails
-        if file_id:
-            try:
-                delete_file(file_id)
-            except:
-                pass  # Suppress errors in cleanup during error handling
-                
-        # Return a fallback name that's at least unique
+    if not text_content:
+        # If text extraction fails, use a timestamp-based name
         fallback_name = f"file_{int(time.time())}"
-        print(f"Using fallback name due to error: {fallback_name}")
-        cache_md5sum(file_path, fallback_name)  # Cache the fallback too
+        print(f"Text extraction failed, using fallback name: {fallback_name}")
+        cache_md5sum(file_path, fallback_name)
         return fallback_name
+    
+    # Get name suggestion from text content
+    filename = get_name_from_text(text_content)
+    
+    # Cache the result
+    cache_md5sum(file_path, filename)
+    return filename
 
 if __name__ == "__main__":
     generated_name = getAiGeneratedName('/mnt/y/My Drive/Brother (1)/Scan2023-10-21_130607.pdf')
