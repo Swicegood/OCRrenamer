@@ -5,17 +5,50 @@ from openai import OpenAI
 # Initialize OpenAI client
 client = OpenAI()
 
+def truncate_text(text, max_chars=4000):
+    """
+    Truncate text to a reasonable size, trying to break at paragraph or sentence.
+    """
+    if not text or len(text) <= max_chars:
+        return text
+        
+    # Try to find a paragraph break near the limit
+    truncated = text[:max_chars]
+    last_para = truncated.rfind('\n\n')
+    if last_para > max_chars // 2:
+        return truncated[:last_para].strip()
+        
+    # If no good paragraph break, try sentence break
+    last_sentence = max(
+        truncated.rfind('. '),
+        truncated.rfind('.\n'),
+        truncated.rfind('! '),
+        truncated.rfind('?\n')
+    )
+    if last_sentence > max_chars // 2:
+        return truncated[:last_sentence + 1].strip()
+        
+    # If no good breaks found, just truncate at word boundary
+    last_space = truncated.rfind(' ')
+    if last_space > max_chars // 2:
+        return truncated[:last_space].strip()
+        
+    return truncated.strip()
+
 def get_name_from_text(text_content):
     """
     Get a filename suggestion using chat completion based on text content.
     Much more efficient than using the assistants API with file uploads.
     """
     try:
+        # Truncate text to avoid context length issues
+        truncated_text = truncate_text(text_content)
+        
         completion = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": "You are a file naming assistant. Generate a descriptive filename based on the content provided. Use only alphanumeric characters and underscores. Do not include spaces or special characters. Do not include any explanation, just output the filename without extension."},
-                {"role": "user", "content": text_content}
+                {"role": "user", "content": truncated_text}
             ],
             max_tokens=50,  # We only need a short response
             temperature=0.7  # Some creativity but not too random
@@ -35,6 +68,23 @@ def extract_text_from_pdf(pdf_path):
     """
     try:
         import subprocess
+        
+        # First try to extract just the first few pages
+        try:
+            result = subprocess.run(
+                ['pdftotext', '-f', '1', '-l', '3', pdf_path, '-'],  # First 3 pages
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True
+            )
+            text = result.stdout.strip()
+            if text and len(text) > 100:  # If we got enough text from first pages
+                return text
+        except Exception as first_try_error:
+            print(f"First attempt at text extraction failed: {str(first_try_error)}")
+        
+        # If first attempt didn't get enough text, try whole document
         result = subprocess.run(
             ['pdftotext', pdf_path, '-'],
             check=True,
