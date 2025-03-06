@@ -569,7 +569,8 @@ def fix_orientation_and_ocr(pdf_path):
     original_path = pdf_path  # Keep track of the original file path
     
     # If this is already a rotated file, skip orientation check and go straight to OCR
-    if '-rotated' in pdf_path:
+    if '-rot' not in pdf_path:
+        current_path = pdf_path
         log(f"Processing already rotated file, proceeding directly to OCR")
         filebase = os.path.splitext(pdf_path)[0]
         ocr_path = filebase + '-ocr.pdf'
@@ -603,7 +604,7 @@ def fix_orientation_and_ocr(pdf_path):
                     if correct_orientation:
                         log(f"Successfully OCR'd rotated file with good text")
                         # Clean up all previous files including original
-                        if current_path != original_path and os.path.exists(current_path):
+                        if  os.path.exists(current_path) and current_path != original_path:
                             os.remove(current_path)
                         if os.path.exists(original_path):
                             log(f"Cleaning up original file: {original_path}")
@@ -611,6 +612,8 @@ def fix_orientation_and_ocr(pdf_path):
                         return ocr_path
                 
                 log(f"OCR'd text quality not good, will need further processing")
+                if os.path.exists(ocr_path):
+                    os.remove(ocr_path)
             else:
                 log(f"OCR failed to produce valid PDF")
                 if os.path.exists(ocr_path):
@@ -619,9 +622,6 @@ def fix_orientation_and_ocr(pdf_path):
             log(f"OCR failed: {str(e)}")
             if os.path.exists(ocr_path):
                 os.remove(ocr_path)
-        
-        # If we get here, OCR failed or produced bad text
-        return pdf_path
     
     # For original files, check if they already have good text
     has_text = is_already_ocrd(pdf_path)
