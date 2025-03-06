@@ -516,53 +516,49 @@ def try_rotation_angle(pdf_path, angle, output_path):
     Try rotating a PDF by a specific angle.
     Returns True if rotation was successful and produced valid PDF.
     """
+    # Convert angle to pdftk rotation letter
+    rotation_map = {
+        90: 'east',   # East = 90 degrees
+        180: 'south',  # South = 180 degrees
+        270: 'west'   # West = 270 degrees
+    }
+    
+    if angle not in rotation_map:
+        log(f"Invalid rotation angle: {angle}")
+        return False
+        
+    rotation_letter = rotation_map[angle]
+    
     try:
-        # Try qpdf first (more reliable for pure rotation)
-        try:
-            rotate_cmd = [
-                'qpdf',
-                '--rotate=' + str(angle),
-                pdf_path,
-                output_path
-            ]
-            result = subprocess.run(rotate_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                log(f"Qpdf rotation failed with return code {result.returncode}")
-                log(f"Qpdf stdout: {result.stdout}")
-                log(f"Qpdf stderr: {result.stderr}")
-            elif validate_pdf(output_path):
-                return True
-        except Exception as e:
-            log(f"Qpdf rotation failed: {str(e)}")
+        # Use correct pdftk syntax for rotation
+        rotate_cmd = [
+            'pdftk',
+            pdf_path,
+            'cat',
+            f'1-end{rotation_letter}',  # Correct syntax: e.g., '1-endE' for 90 degrees
+            'output',
+            output_path
+        ]
+        result = subprocess.run(rotate_cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            log(f"Rotate failed with return code {result.returncode}")
+            log(f"Rotate stdout: {result.stdout}")
+            log(f"Rotate stderr: {result.stderr}")
+            return False
+        
+        # Validate the rotated PDF
+        if validate_pdf(output_path):
+            return True
+        else:
             if os.path.exists(output_path):
                 os.remove(output_path)
-
-        # Try pdftk as backup
-        try:
-            rotate_cmd = [
-                'pdftk',
-                pdf_path,
-                'rotate',
-                f'{angle}east',
-                'output',
-                output_path
-            ]
-            result = subprocess.run(rotate_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                log(f"Pdftk rotation failed with return code {result.returncode}")
-                log(f"Pdftk stdout: {result.stdout}")
-                log(f"Pdftk stderr: {result.stderr}")
-            elif validate_pdf(output_path):
-                return True
-        except Exception as e:
-            log(f"Pdftk rotation failed: {str(e)}")
-            if os.path.exists(output_path):
-                os.remove(output_path)
+            return False
+            
     except Exception as e:
         log(f"Rotation by {angle} degrees failed: {str(e)}")
         if os.path.exists(output_path):
             os.remove(output_path)
-    return False
+        return False
 
 def fix_orientation_and_ocr(pdf_path):
     """
@@ -570,6 +566,7 @@ def fix_orientation_and_ocr(pdf_path):
     Returns the path to the final processed PDF.
     """
     log(f"Starting orientation and OCR process for: {pdf_path}")
+    original_path = pdf_path  # Keep track of the original file path
     
     # If this is already a rotated file, skip orientation check and go straight to OCR
     if '-rotated' in pdf_path:
@@ -605,6 +602,12 @@ def fix_orientation_and_ocr(pdf_path):
                     correct_orientation = check_page_orientation(ocr_path)
                     if correct_orientation:
                         log(f"Successfully OCR'd rotated file with good text")
+                        # Clean up all previous files including original
+                        if current_path != original_path and os.path.exists(current_path):
+                            os.remove(current_path)
+                        if os.path.exists(original_path):
+                            log(f"Cleaning up original file: {original_path}")
+                            os.remove(original_path)
                         return ocr_path
                 
                 log(f"OCR'd text quality not good, will need further processing")
@@ -652,6 +655,7 @@ def fix_orientation_and_ocr(pdf_path):
         
         if not rotation_successful:
             log(f"All rotation angles failed on attempt {attempts}")
+            continue  # Try next attempt
         
         # After rotation, immediately OCR without checking for text
         try:
@@ -679,7 +683,7 @@ def fix_orientation_and_ocr(pdf_path):
                     os.remove(ocr_path)
                 if os.path.exists(rotated_path):
                     os.remove(rotated_path)
-                return current_path
+                continue  # Try next attempt
             
             # Clean up the intermediate rotated file
             if os.path.exists(rotated_path):
@@ -693,22 +697,25 @@ def fix_orientation_and_ocr(pdf_path):
                     correct_orientation = check_page_orientation(ocr_path)
                     if correct_orientation:
                         log(f"Found good text orientation after rotation and OCR")
-                        # Clean up the previous file if it's not the original
-                        if current_path != pdf_path and os.path.exists(current_path):
+                        # Clean up all previous files including original
+                        if current_path != original_path and os.path.exists(current_path):
                             os.remove(current_path)
+                        if os.path.exists(original_path):
+                            log(f"Cleaning up original file: {original_path}")
+                            os.remove(original_path)
                         return ocr_path
                 
                 # If text isn't good, continue to next rotation attempt
                 log(f"OCR successful but text quality not good, trying next rotation")
                 # Clean up previous file if it's not the original
-                if current_path != pdf_path and os.path.exists(current_path):
+                if current_path != original_path and os.path.exists(current_path):
                     os.remove(current_path)
                 current_path = ocr_path
             else:
-                log(f"OCR failed to produce valid PDF on attempt {attempts}")
+                log(f"OCR failed to produce valid PDF")
                 if os.path.exists(ocr_path):
                     os.remove(ocr_path)
-                return current_path
+                continue  # Try next attempt
             
         except Exception as e:
             log(f"OCR failed on attempt {attempts}: {str(e)}")
@@ -716,7 +723,7 @@ def fix_orientation_and_ocr(pdf_path):
                 os.remove(ocr_path)
             if os.path.exists(rotated_path):
                 os.remove(rotated_path)
-            return current_path
+            continue  # Try next attempt
     
     log(f"Reached maximum rotation attempts ({max_attempts})")
     return current_path
