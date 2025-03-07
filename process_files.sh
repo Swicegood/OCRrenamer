@@ -24,21 +24,22 @@ check_docker_success() {
 
 # List files in remote directory
 echo "Listing files in remote directory..."
-remote_files=$(rclone --config "$RCLONE_CONFIG" ls "$SOURCE_DIR")
-
-# Process each file from the remote listing
+# Use process substitution to properly handle newlines
 while IFS= read -r line; do
-    # Extract filename from rclone ls output (removes size and spaces)
-    filename=$(echo "$line" | sed 's/^[0-9]* //g')
+    # Trim leading spaces and extract size and filename from rclone ls output
+    # Format is: "   <size> <filename>"
+    trimmed_line=$(echo "$line" | sed -e 's/^[[:space:]]*//')  # Remove leading spaces
+    size=$(echo "$trimmed_line" | awk '{print $1}')
+    filename=$(echo "$trimmed_line" | cut -d' ' -f2-)  # Get everything after the first space
     [ -z "$filename" ] && continue  # Skip empty lines
     
     # Skip hidden files
     [[ "$filename" == .* ]] && continue
     
-    echo "Processing: $filename"
+    echo "Processing: $filename (size: $size bytes)"
     
-    # Create temporary directory name based on file name
-    temp_dir="/tmp/gptfilenamer_$(basename "$filename")"
+    # Create temporary directory name based on file name (sanitized)
+    temp_dir="/tmp/gptfilenamer_$(basename "$filename" | tr ' ' '_')"
     echo "Creating temporary directory: $temp_dir"
     
     # Create temporary directory
@@ -61,7 +62,7 @@ while IFS= read -r line; do
     
     # Run Docker command with the temporary directory
     echo "Running Docker container for: $filename"
-    docker run -it --rm \
+    docker run --rm \
         -e OPENAI_API_KEY="$OPENAI_API_KEY" \
         -v "$CACHE_FILE:/app/cache.txt" \
         -v "$temp_dir:/data" \
@@ -94,6 +95,6 @@ while IFS= read -r line; do
     rm -rf "$temp_dir"
     echo "Cleaned up temporary directory: $temp_dir"
     echo "----------------------------------------"
-done <<< "$remote_files"
+done < <(rclone --config "$RCLONE_CONFIG" ls "$SOURCE_DIR")
 
 echo "All files processed" 
